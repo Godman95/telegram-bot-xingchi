@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: telegram-bot-xingchi
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python telegram-bot-render.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: XINGCHI_API_KEY
+        sync: false
