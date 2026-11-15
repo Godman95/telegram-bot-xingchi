@@ -38,7 +38,7 @@ import requests
 import telebot
 from flask import Flask
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "openai/gpt-oss-120b"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 SYSTEM_PROMPT = (
     "Ban la mot tro ly AI than thien, tra loi bang tieng Viet, "
