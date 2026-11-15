@@ -25,7 +25,7 @@ import telebot
 from flask import Flask
 
 XINGCHI_BASE_URL = "https://api.xingchiapi.com/v1"
-MODEL = "gpt-6.1-sol"
+MODEL = "gpt-6-astra"
 SYSTEM_PROMPT = (
     "Ban la mot tro ly AI than thien, tra loi bang tieng Viet, "
     "ngan gon va de hieu."
