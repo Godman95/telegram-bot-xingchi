@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegram AI bot chay bang Xingchi GPT (gpt-6.1-sol) — ban deploy Render.
+"""Telegram AI bot chay bang Google Gemini (mien phi) — ban deploy Render.
 
 Ban nay them mot web server nho (Flask) de Render giu service song
 va UptimeRobot ping giu bot khong ngu (Render free tat service sau
@@ -9,7 +9,7 @@ Cach deploy (xem huong dan day du trong chat):
   1. Upload 3 file (telegram-bot-render.py, requirements.txt,
      render.yaml) len mot repo GitHub.
   2. Tren render.com: New -> Web Service -> chon repo.
-  3. Them bien moi truong TELEGRAM_BOT_TOKEN va XINGCHI_API_KEY.
+  3. Them bien moi truong TELEGRAM_BOT_TOKEN va GEMINI_API_KEY.
   4. Deploy. Them monitor tren uptimerobot.com ping URL cua service
      moi 5 phut de bot chay 24/7.
 
@@ -26,8 +26,10 @@ import requests
 import telebot
 from flask import Flask
 
-XINGCHI_BASE_URL = "https://api.xingchiapi.com/v1"
-MODEL = "gpt-6.1-sol"
+MODEL = "gemini-3.8-flash"
+GEMINI_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+)
 SYSTEM_PROMPT = (
     "Ban la mot tro ly AI than thien, tra loi bang tieng Viet, "
     "ngan gon va de hieu."
@@ -35,11 +37,11 @@ SYSTEM_PROMPT = (
 MAX_HISTORY = 10  # so cap tin nhan giu lai cho moi nguoi dung
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-XINGCHI_KEY = os.environ.get("XINGCHI_API_KEY", "").strip()
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
-if not TELEGRAM_TOKEN or not XINGCHI_KEY:
+if not TELEGRAM_TOKEN or not GEMINI_KEY:
     raise SystemExit(
-        "Thieu TELEGRAM_BOT_TOKEN hoac XINGCHI_API_KEY. "
+        "Thieu TELEGRAM_BOT_TOKEN hoac GEMINI_API_KEY. "
         "Them 2 bien moi truong nay trong Render Dashboard."
     )
 
@@ -119,26 +121,32 @@ def record_reply():
 load_stats()
 
 
-def ask_xingchi(user_id, text):
+def ask_gemini(user_id, text):
     history = histories.setdefault(user_id, [])
     history.append({"role": "user", "content": text})
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[
-        -MAX_HISTORY * 2:
-    ]
+    contents = []
+    for msg in history[-MAX_HISTORY * 2:]:
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": contents,
+    }
     r = requests.post(
-        f"{XINGCHI_BASE_URL}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {XINGCHI_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={"model": MODEL, "messages": messages},
+        GEMINI_URL,
+        headers={"x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json"},
+        json=payload,
         timeout=120,
     )
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError:
-        raise RuntimeError(f"Xingchi tra ve {r.status_code}: {r.text[:300]}")
-    reply = r.json()["choices"][0]["message"]["content"]
+        raise RuntimeError(f"Gemini tra ve {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    try:
+        reply = data["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        reply = "Xin loi, Gemini khong tra loi duoc cau nay."
     history.append({"role": "assistant", "content": reply})
     return reply
 
@@ -249,7 +257,7 @@ def chat(m):
         return
     bot.send_chat_action(m.chat.id, "typing")
     try:
-        reply = ask_xingchi(m.from_user.id, m.text)
+        reply = ask_gemini(m.from_user.id, m.text)
     except Exception as e:
         bot.reply_to(m, f"Xin loi, goi AI bi loi: {e}")
         return
