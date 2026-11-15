@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Telegram AI bot chay bang Google Gemini (mien phi) — ban deploy Render.
+"""Telegram bot thong ke tin nhan — ban deploy Render (khong can API key AI).
+
+Bot dem tin nhan trong nhom va tra loi cac lenh thong ke:
+  /stats   - tong tin nhan, tin theo ngay, top nguoi chat nhieu nhat
+  /members - so thanh vien nhom, thanh vien tich cuc
+  /model   - xem AI dang bat hay tat
+  /reset   - xoa lich su chat AI (neu co)
+
+AI (Google Gemini) la TUY CHON: neu co bien moi truong GEMINI_API_KEY
+thi bot tra loi tin nhan bang AI; neu khong co, bot chi thong ke
+tin nhan va khong can key nao ca. Chi can TELEGRAM_BOT_TOKEN.
 
 Ban nay them mot web server nho (Flask) de Render giu service song
 va UptimeRobot ping giu bot khong ngu (Render free tat service sau
@@ -9,7 +19,8 @@ Cach deploy (xem huong dan day du trong chat):
   1. Upload 3 file (telegram-bot-render.py, requirements.txt,
      render.yaml) len mot repo GitHub.
   2. Tren render.com: New -> Web Service -> chon repo.
-  3. Them bien moi truong TELEGRAM_BOT_TOKEN va GEMINI_API_KEY.
+  3. Them bien moi truong TELEGRAM_BOT_TOKEN (bat buoc).
+     Them GEMINI_API_KEY neu muon bat AI (tuy chon).
   4. Deploy. Them monitor tren uptimerobot.com ping URL cua service
      moi 5 phut de bot chay 24/7.
 
@@ -37,13 +48,24 @@ SYSTEM_PROMPT = (
 MAX_HISTORY = 10  # so cap tin nhan giu lai cho moi nguoi dung
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+# AI la tuy chon: khong co key thi bot chi thong ke tin nhan.
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
-if not TELEGRAM_TOKEN or not GEMINI_KEY:
+if not TELEGRAM_TOKEN:
     raise SystemExit(
-        "Thieu TELEGRAM_BOT_TOKEN hoac GEMINI_API_KEY. "
-        "Them 2 bien moi truong nay trong Render Dashboard."
+        "Thieu TELEGRAM_BOT_TOKEN. "
+        "Them bien moi truong nay trong Render Dashboard."
     )
+
+if GEMINI_KEY:
+    # Chi in do dai + 4 ky tu dau de kiem tra key (khong in key).
+    print(
+        f"GEMINI_API_KEY loaded: len={len(GEMINI_KEY)}, prefix={GEMINI_KEY[:4]}",
+        flush=True,
+    )
+    print("AI: bat (Gemini)", flush=True)
+else:
+    print("AI: tat (che do thong ke, khong can API key)", flush=True)
 
 # ---- Web server nho de Render + UptimeRobot ping giu bot song ----
 app = Flask(__name__)
@@ -159,16 +181,26 @@ def send_long(chat_id, text, reply_to=None):
 
 @bot.message_handler(commands=["start"])
 def start(m):
-    bot.reply_to(
-        m,
-        "Xin chao! Toi la bot AI chay bang GPT. Cu nhan tin, toi se tra loi.\n"
-        "Lenh: /reset (xoa lich su chat), /model (xem model dang dung), "
-        "/stats (thong ke tin nhan), /members (thong ke thanh vien nhom).",
-    )
+    record_message(m)
+    if GEMINI_KEY:
+        bot.reply_to(
+            m,
+            "Xin chao! Toi la bot AI. Cu nhan tin, toi se tra loi.\n"
+            "Lenh: /reset (xoa lich su chat), /model (xem model dang dung), "
+            "/stats (thong ke tin nhan), /members (thong ke thanh vien nhom).",
+        )
+    else:
+        bot.reply_to(
+            m,
+            "Xin chao! Toi la bot thong ke tin nhan (khong dung AI).\n"
+            "Lenh: /stats (thong ke tin nhan), "
+            "/members (thong ke thanh vien nhom), /model (xem AI dang bat hay tat).",
+        )
 
 
 @bot.message_handler(commands=["reset"])
 def reset(m):
+    record_message(m)
     histories.pop(m.from_user.id, None)
     group_sessions.pop((m.chat.id, m.from_user.id), None)
     bot.reply_to(m, "Da xoa lich su tro chuyen.")
@@ -176,12 +208,18 @@ def reset(m):
 
 @bot.message_handler(commands=["model"])
 def model(m):
-    bot.reply_to(m, f"Model dang dung: {MODEL}")
+    record_message(m)
+    if GEMINI_KEY:
+        bot.reply_to(m, f"Model dang dung: {MODEL}")
+    else:
+        bot.reply_to(
+            m, "AI dang tat (chua co API key). Bot dang chay che do thong ke."
+        )
 
 
 @bot.message_handler(commands=["stats"])
 def stats_cmd(m):
-    users = stats["users"]
+    record_message(m)
     today = stats["days"].get(date.today().isoformat(), 0)
     uid = str(m.from_user.id)
     mine = users.get(uid, {}).get("count", 0)
@@ -204,6 +242,7 @@ def stats_cmd(m):
 
 @bot.message_handler(commands=["members"])
 def members_cmd(m):
+    record_message(m)
     if m.chat.type == "private":
         bot.reply_to(m, "Lenh nay chi dung trong nhom.")
         return
@@ -254,6 +293,14 @@ def is_for_bot(m):
 def chat(m):
     record_message(m)
     if not is_for_bot(m):
+        return
+    if not GEMINI_KEY:
+        bot.reply_to(
+            m,
+            "AI dang tat — bot chi thong ke tin nhan.\n"
+            "Dung /stats de xem thong ke, /members de xem thanh vien.",
+        )
+        record_reply()
         return
     bot.send_chat_action(m.chat.id, "typing")
     try:
