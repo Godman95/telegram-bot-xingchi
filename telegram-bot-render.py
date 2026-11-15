@@ -16,9 +16,11 @@ Cach deploy (xem huong dan day du trong chat):
 KHONG gui token/key qua chat.
 """
 
+import json
 import os
 import threading
 import time
+from datetime import date
 
 import requests
 import telebot
@@ -67,6 +69,45 @@ GROUP_SESSION_TIMEOUT = 5 * 60  # 5 phut: sau khi @bot, user co 5 phut
 # noi chuyen tiep ma khong can @ lai; moi tin nhan lam moi lai 5 phut.
 group_sessions = {}  # (chat_id, user_id) -> thoi gian tin nhan cuoi
 
+# ---- Thong ke tin nhan (luu vao stats.json) ----
+STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats.json")
+stats = {"total_messages": 0, "total_replies": 0, "users": {}, "days": {}}
+
+
+def load_stats():
+    try:
+        with open(STATS_FILE, "r", encoding="utf-8") as f:
+            stats.update(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+
+def save_stats():
+    tmp = STATS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(stats, f, ensure_ascii=False)
+    os.replace(tmp, STATS_FILE)
+
+
+def record_message(m):
+    stats["total_messages"] += 1
+    today = date.today().isoformat()
+    stats["days"][today] = stats["days"].get(today, 0) + 1
+    uid = str(m.from_user.id)
+    name = m.from_user.first_name or m.from_user.username or uid
+    u = stats["users"].setdefault(uid, {"name": name, "count": 0})
+    u["name"] = name
+    u["count"] += 1
+    save_stats()
+
+
+def record_reply():
+    stats["total_replies"] += 1
+    save_stats()
+
+
+load_stats()
+
 
 def ask_xingchi(user_id, text):
     history = histories.setdefault(user_id, [])
@@ -100,7 +141,8 @@ def start(m):
     bot.reply_to(
         m,
         "Xin chao! Toi la bot AI chay bang GPT. Cu nhan tin, toi se tra loi.\n"
-        "Lenh: /reset (xoa lich su chat), /model (xem model dang dung).",
+        "Lenh: /reset (xoa lich su chat), /model (xem model dang dung), "
+        "/stats (thong ke tin nhan).",
     )
 
 
@@ -114,6 +156,28 @@ def reset(m):
 @bot.message_handler(commands=["model"])
 def model(m):
     bot.reply_to(m, f"Model dang dung: {MODEL}")
+
+
+@bot.message_handler(commands=["stats"])
+def stats_cmd(m):
+    users = stats["users"]
+    today = stats["days"].get(date.today().isoformat(), 0)
+    uid = str(m.from_user.id)
+    mine = users.get(uid, {}).get("count", 0)
+    top = sorted(users.values(), key=lambda u: u["count"], reverse=True)[:5]
+    lines = [
+        "Thong ke bot",
+        f"Tong tin nhan: {stats['total_messages']}",
+        f"Bot da tra loi: {stats['total_replies']}",
+        f"Hom nay: {today}",
+        f"So nguoi dung: {len(users)}",
+        f"Tin nhan cua ban: {mine}",
+        "",
+        "Top 5 nguoi chat nhieu nhat:",
+    ]
+    for i, u in enumerate(top, 1):
+        lines.append(f"{i}. {u['name']}: {u['count']}")
+    bot.reply_to(m, "\n".join(lines))
 
 
 def is_for_bot(m):
@@ -143,6 +207,7 @@ def is_for_bot(m):
 def chat(m):
     if not is_for_bot(m):
         return
+    record_message(m)
     bot.send_chat_action(m.chat.id, "typing")
     try:
         reply = ask_xingchi(m.from_user.id, m.text)
@@ -151,6 +216,7 @@ def chat(m):
         return
     reply_to = m.message_id if m.chat.type != "private" else None
     send_long(m.chat.id, reply, reply_to=reply_to)
+    record_reply()
 
 
 print("Bot dang chay...")
