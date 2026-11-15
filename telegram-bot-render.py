@@ -58,6 +58,9 @@ threading.Thread(target=run_flask, daemon=True).start()
 
 # ---- Telegram bot ----
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+ME = bot.get_me()
+BOT_USERNAME = ME.username
+BOT_ID = ME.id
 histories = {}  # user_id -> [{"role": ..., "content": ...}]
 
 
@@ -82,9 +85,10 @@ def ask_xingchi(user_id, text):
     return reply
 
 
-def send_long(chat_id, text):
+def send_long(chat_id, text, reply_to=None):
     for i in range(0, len(text), 4000):
-        bot.send_message(chat_id, text[i : i + 4000])
+        bot.send_message(chat_id, text[i : i + 4000], reply_to_message_id=reply_to)
+        reply_to = None  # chi reply tin dau tien
 
 
 @bot.message_handler(commands=["start"])
@@ -107,15 +111,34 @@ def model(m):
     bot.reply_to(m, f"Model dang dung: {MODEL}")
 
 
+def is_for_bot(m):
+    """Chat rieng: tra loi moi tin. Trong nhom: chi tra loi khi duoc
+    nhac toi (@ten_bot) hoac khi co nguoi reply tin nhan cua bot."""
+    if m.chat.type == "private":
+        return True
+    if m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID:
+        return True
+    if m.entities:
+        for e in m.entities:
+            if e.type == "mention":
+                mentioned = m.text[e.offset : e.offset + e.length]
+                if mentioned.lower() == f"@{BOT_USERNAME}".lower():
+                    return True
+    return False
+
+
 @bot.message_handler(func=lambda m: True, content_types=["text"])
 def chat(m):
+    if not is_for_bot(m):
+        return
     bot.send_chat_action(m.chat.id, "typing")
     try:
         reply = ask_xingchi(m.from_user.id, m.text)
     except Exception as e:
         bot.reply_to(m, f"Xin loi, goi AI bi loi: {e}")
         return
-    send_long(m.chat.id, reply)
+    reply_to = m.message_id if m.chat.type != "private" else None
+    send_long(m.chat.id, reply, reply_to=reply_to)
 
 
 print("Bot dang chay...")
