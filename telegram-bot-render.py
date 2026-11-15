@@ -27,7 +27,7 @@ import telebot
 from flask import Flask
 
 XINGCHI_BASE_URL = "https://api.xingchiapi.com/v1"
-MODEL = "gpt-6-astra"
+MODEL = "gpt-6.1-sol"
 SYSTEM_PROMPT = (
     "Ban la mot tro ly AI than thien, tra loi bang tieng Viet, "
     "ngan gon va de hieu."
@@ -134,7 +134,10 @@ def ask_xingchi(user_id, text):
         json={"model": MODEL, "messages": messages},
         timeout=120,
     )
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except requests.exceptions.HTTPError:
+        raise RuntimeError(f"Xingchi tra ve {r.status_code}: {r.text[:300]}")
     reply = r.json()["choices"][0]["message"]["content"]
     history.append({"role": "assistant", "content": reply})
     return reply
