@@ -230,6 +230,11 @@ def stats_cmd(m):
     ]
     for i, u in enumerate(top, 1):
         lines.append(f"{i}. {u['name']}: {u['count']}")
+    bottom = sorted(users.values(), key=lambda u: u["count"])[:5]
+    lines.append("")
+    lines.append("Top 5 nguoi chat it nhat:")
+    for i, u in enumerate(bottom, 1):
+        lines.append(f"{i}. {u['name']}: {u['count']}")
     bot.reply_to(m, "\n".join(lines))
 
 
@@ -243,20 +248,87 @@ def members_cmd(m):
         total = bot.get_chat_member_count(m.chat.id)
     except Exception:
         total = None
-    c = stats.get("chats", {}).get(str(m.chat.id), {"total": 0, "users": {}})
-    active = c["users"]
+    try:
+        admins = bot.get_chat_administrators(m.chat.id)
+        admin_names = [
+            a.user.first_name or a.user.username or str(a.user.id) for a in admins
+        ]
+    except Exception:
+        admin_names = []
+    c = stats.get("chats", {}).get(
+        str(m.chat.id), {"total": 0, "users": {}, "joined": {}}
+    )
+    chatted = c.get("users", {})
+    joined = c.get("joined", {})
+    known = {}
+    for uid, u in chatted.items():
+        known[uid] = u["name"]
+    for uid, u in joined.items():
+        known.setdefault(uid, u["name"])
     lines = [
         f"Tong thanh vien nhom: {total}" if total is not None else "Tong thanh vien nhom: ?",
-        f"Da nhan tin (tu khi bat dau thong ke): {len(active)}",
-        f"Tong tin nhan trong nhom: {c['total']}",
+        f"Quan tri vien ({len(admin_names)}): "
+        + (", ".join(admin_names) if admin_names else "?"),
+        f"Thanh vien bot biet ({len(known)}): da nhan tin hoac vao nhom khi bot co mat",
+        f"Tong tin nhan trong nhom: {c.get('total', 0)}",
         "",
-        "Thanh vien da nhan tin:",
+        "Thanh vien:",
     ]
-    for i, u in enumerate(
-        sorted(active.values(), key=lambda x: x["count"], reverse=True), 1
+    for i, (uid, name) in enumerate(
+        sorted(known.items(), key=lambda kv: -chatted.get(kv[0], {}).get("count", 0)),
+        1,
     ):
-        lines.append(f"{i}. {u['name']}: {u['count']}")
+        n = chatted.get(uid, {}).get("count", 0)
+        lines.append(f"{i}. {name}: {n} tin" if n else f"{i}. {name}: chua nhan tin")
+    least = sorted(
+        known.items(), key=lambda kv: chatted.get(kv[0], {}).get("count", 0)
+    )[:5]
+    lines.append("")
+    lines.append("Top 5 nguoi it hoat dong nhat:")
+    for i, (uid, name) in enumerate(least, 1):
+        n = chatted.get(uid, {}).get("count", 0)
+        lines.append(f"{i}. {name}: {n} tin" if n else f"{i}. {name}: chua nhan tin")
     bot.reply_to(m, "\n".join(lines))
+
+
+@bot.message_handler(content_types=["new_chat_members"])
+def on_join(m):
+    """Ghi lai thanh vien moi vao nhom (bot nhan duoc su kien nay
+    ke ca khi Group Privacy dang bat)."""
+    cid = str(m.chat.id)
+    c = stats.setdefault("chats", {}).setdefault(
+        cid,
+        {"title": m.chat.title or cid, "total": 0, "users": {}, "joined": {}, "left": {}},
+    )
+    for u in m.new_chat_members:
+        if u.id == BOT_ID:
+            continue
+        name = u.first_name or u.username or str(u.id)
+        c.setdefault("joined", {})[str(u.id)] = {
+            "name": name,
+            "date": date.today().isoformat(),
+        }
+        c.setdefault("left", {}).pop(str(u.id), None)
+    save_stats()
+
+
+@bot.message_handler(content_types=["left_chat_member"])
+def on_leave(m):
+    """Ghi lai thanh vien roi nhom."""
+    u = m.left_chat_member
+    if u.id == BOT_ID:
+        return
+    cid = str(m.chat.id)
+    c = stats.get("chats", {}).get(cid)
+    if not c:
+        return
+    name = u.first_name or u.username or str(u.id)
+    c.setdefault("joined", {}).pop(str(u.id), None)
+    c.setdefault("left", {})[str(u.id)] = {
+        "name": name,
+        "date": date.today().isoformat(),
+    }
+    save_stats()
 
 
 def is_for_bot(m):
