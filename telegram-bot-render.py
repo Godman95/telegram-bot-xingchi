@@ -71,7 +71,7 @@ group_sessions = {}  # (chat_id, user_id) -> thoi gian tin nhan cuoi
 
 # ---- Thong ke tin nhan (luu vao stats.json) ----
 STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats.json")
-stats = {"total_messages": 0, "total_replies": 0, "users": {}, "days": {}}
+stats = {"total_messages": 0, "total_replies": 0, "users": {}, "days": {}, "chats": {}}
 
 
 def load_stats():
@@ -98,6 +98,16 @@ def record_message(m):
     u = stats["users"].setdefault(uid, {"name": name, "count": 0})
     u["name"] = name
     u["count"] += 1
+    if m.chat.type != "private":
+        cid = str(m.chat.id)
+        c = stats.setdefault("chats", {}).setdefault(
+            cid, {"title": m.chat.title or cid, "total": 0, "users": {}}
+        )
+        c["title"] = m.chat.title or cid
+        c["total"] += 1
+        cu = c["users"].setdefault(uid, {"name": name, "count": 0})
+        cu["name"] = name
+        cu["count"] += 1
     save_stats()
 
 
@@ -142,7 +152,7 @@ def start(m):
         m,
         "Xin chao! Toi la bot AI chay bang GPT. Cu nhan tin, toi se tra loi.\n"
         "Lenh: /reset (xoa lich su chat), /model (xem model dang dung), "
-        "/stats (thong ke tin nhan).",
+        "/stats (thong ke tin nhan), /members (thong ke thanh vien nhom).",
     )
 
 
@@ -169,6 +179,7 @@ def stats_cmd(m):
         "Thong ke bot",
         f"Tong tin nhan: {stats['total_messages']}",
         f"Bot da tra loi: {stats['total_replies']}",
+        f"Bot bo qua: {stats['total_messages'] - stats['total_replies']}",
         f"Hom nay: {today}",
         f"So nguoi dung: {len(users)}",
         f"Tin nhan cua ban: {mine}",
@@ -176,6 +187,31 @@ def stats_cmd(m):
         "Top 5 nguoi chat nhieu nhat:",
     ]
     for i, u in enumerate(top, 1):
+        lines.append(f"{i}. {u['name']}: {u['count']}")
+    bot.reply_to(m, "\n".join(lines))
+
+
+@bot.message_handler(commands=["members"])
+def members_cmd(m):
+    if m.chat.type == "private":
+        bot.reply_to(m, "Lenh nay chi dung trong nhom.")
+        return
+    try:
+        total = bot.get_chat_member_count(m.chat.id)
+    except Exception:
+        total = None
+    c = stats.get("chats", {}).get(str(m.chat.id), {"total": 0, "users": {}})
+    active = c["users"]
+    lines = [
+        f"Tong thanh vien nhom: {total}" if total is not None else "Tong thanh vien nhom: ?",
+        f"Da nhan tin (tu khi bat dau thong ke): {len(active)}",
+        f"Tong tin nhan trong nhom: {c['total']}",
+        "",
+        "Thanh vien da nhan tin:",
+    ]
+    for i, u in enumerate(
+        sorted(active.values(), key=lambda x: x["count"], reverse=True), 1
+    ):
         lines.append(f"{i}. {u['name']}: {u['count']}")
     bot.reply_to(m, "\n".join(lines))
 
@@ -205,9 +241,9 @@ def is_for_bot(m):
 
 @bot.message_handler(func=lambda m: True, content_types=["text"])
 def chat(m):
+    record_message(m)
     if not is_for_bot(m):
         return
-    record_message(m)
     bot.send_chat_action(m.chat.id, "typing")
     try:
         reply = ask_xingchi(m.from_user.id, m.text)
