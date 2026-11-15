@@ -18,6 +18,7 @@ KHONG gui token/key qua chat.
 
 import os
 import threading
+import time
 
 import requests
 import telebot
@@ -62,6 +63,9 @@ ME = bot.get_me()
 BOT_USERNAME = ME.username
 BOT_ID = ME.id
 histories = {}  # user_id -> [{"role": ..., "content": ...}]
+GROUP_SESSION_TIMEOUT = 5 * 60  # 5 phut: sau khi @bot, user co 5 phut
+# noi chuyen tiep ma khong can @ lai; moi tin nhan lam moi lai 5 phut.
+group_sessions = {}  # (chat_id, user_id) -> thoi gian tin nhan cuoi
 
 
 def ask_xingchi(user_id, text):
@@ -103,6 +107,7 @@ def start(m):
 @bot.message_handler(commands=["reset"])
 def reset(m):
     histories.pop(m.from_user.id, None)
+    group_sessions.pop((m.chat.id, m.from_user.id), None)
     bot.reply_to(m, "Da xoa lich su tro chuyen.")
 
 
@@ -112,18 +117,25 @@ def model(m):
 
 
 def is_for_bot(m):
-    """Chat rieng: tra loi moi tin. Trong nhom: chi tra loi khi duoc
-    nhac toi (@ten_bot) hoac khi co nguoi reply tin nhan cua bot."""
+    """Chat rieng: tra loi moi tin.
+    Trong nhom: tra loi khi duoc @, khi duoc reply, hoac khi user dang
+    trong phien tro chuyen (da @bot trong 5 phut gan nhat)."""
     if m.chat.type == "private":
         return True
     if m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID:
+        group_sessions[(m.chat.id, m.from_user.id)] = time.monotonic()
         return True
     if m.entities:
         for e in m.entities:
             if e.type == "mention":
                 mentioned = m.text[e.offset : e.offset + e.length]
                 if mentioned.lower() == f"@{BOT_USERNAME}".lower():
+                    group_sessions[(m.chat.id, m.from_user.id)] = time.monotonic()
                     return True
+    last = group_sessions.get((m.chat.id, m.from_user.id))
+    if last is not None and time.monotonic() - last < GROUP_SESSION_TIMEOUT:
+        group_sessions[(m.chat.id, m.from_user.id)] = time.monotonic()
+        return True
     return False
 
 
